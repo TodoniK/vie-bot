@@ -88,6 +88,21 @@ def country_code_to_flag(country_code):
         return "🌍"
     return ''.join(chr(ord(c.upper()) + 127397) for c in country_code)
 
+def sanitize_markdown(text):
+    """Échappe les caractères spéciaux Discord markdown pour éviter les problèmes d'affichage"""
+    if not text:
+        return ""
+    # Échappe les caractères markdown Discord : * _ ` ~ | > [ ] ( )
+    for char in ['*', '_', '`', '~', '|', '>', '[', ']', '(', ')']:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+def truncate_text(text, max_len=200):
+    """Tronque un texte proprement avec ellipsis"""
+    if not text or len(text) <= max_len:
+        return text or ""
+    return text[:max_len].rsplit(' ', 1)[0] + "…"
+
 def format_indemnite(amount):
     """Formate un montant en format français (2 994,76)"""
     if not amount:
@@ -118,13 +133,20 @@ def send_discord_notification(offer_data):
         end = format_date(offer_data.get('missionEndDate'))
         telework = "✅ Oui" if offer_data.get('teleworkingAvailable') else "❌ Non"
 
+        # ── Extrait de la mission (sanitisé) ──
+        mission_desc = (offer_data.get('missionDescription', '') or '').strip().lstrip(':').strip()
+        if mission_desc:
+            excerpt = sanitize_markdown(truncate_text(mission_desc, 200))
+            excerpt_block = f"\n> *{excerpt}*\n"
+        else:
+            excerpt_block = ""
+
         # ── Construction de la description ──
         description = (
             f"{location}\n"
-            f"\n"
-            f"💵  **{indemnite_str} €** /mois  •  ⏱️ **{duration} mois**\n"
-            f"🎬  Début : **{start}**\n"
-            f"🏁  Fin : **{end}**\n"
+            f"{excerpt_block}\n"
+            f"💵  **{indemnite_str} €** /mois\n"
+            f"📅  **{duration} mois**  ─  {start} → {end}\n"
             f"🏠  Télétravail : {telework}\n"
         )
 
