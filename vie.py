@@ -28,10 +28,6 @@ API_BASE_URL = "https://civiweb-api-prd.azurewebsites.net/api"
 API_SEARCH_URL = f"{API_BASE_URL}/Offers/search"
 API_DETAILS_URL = f"{API_BASE_URL}/Offers/details"
 
-# Configuration API Gemini
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
-
 #---------------FONCTIONS---------------
 def log(message):
     """Affiche un message avec timestamp"""
@@ -85,101 +81,6 @@ def get_offer_details(offer_id):
         log(f"Erreur lors de la récupération des détails de l'offre {offer_id}: {e}")
         return None
 
-def analyze_offer_with_ai(offer_data):
-    """Analyse une offre avec Gemini pour extraire description et mots-clés"""
-    if not GEMINI_API_KEY:
-        log("[AI] Clé API Gemini non configurée, analyse IA désactivée")
-        return None, None
-    
-    try:
-        mission_title = offer_data.get('missionTitle', '')
-        mission_description = offer_data.get('missionDescription', '')
-        mission_profile = offer_data.get('missionProfile', '')
-        organization_name = offer_data.get('organizationName', '')
-        teleworking_available = offer_data.get('teleworkingAvailable', False)
-        
-        # Construire le prompt pour Gemini
-        prompt = f"""Tu es un assistant qui résume des offres VIE et extrait des mots-clés CV en mode trash absolu, vulgaire à mort, anti-salariat déchaîné : tu craches sur tout, tu insistes lourdement, tu balances des gros mots sans retenue, ton cynisme pue la haine pure du système.
-
-        Contexte (données brutes):
-        - Titre: {mission_title}
-        - Entreprise: {organization_name}
-        - Télétravail disponible: {"Oui" if teleworking_available else "Non"}
-        - missionDescription: {mission_description}
-        - missionProfile (souvent la section la plus utile pour les compétences attendues): {mission_profile}
-
-        Objectif principal pour "description":
-        Produire une description ultra-courte (maximum 2 phrases courtes) qui :
-        1) Donne précisément ce que le candidat va vraiment faire (domaine, tâches concrètes, outils, livrables, environnement — au moins 3 éléments factuels obligatoires).
-        2) Défonce le salariat comme une arnaque dégueulasse, une prison pour cons où tu te fais enculer à sec par des patrons porcs pendant que tu crèves pour un salaire de pute à mi-temps, tout en engraissant ces fils de pute en costard qui te chient dessus.
-        Balance des insultes crues, vulgaires, dégueulasses à chaque fois différentes : 'bordel capitaliste', 'taule à esclaves modernes', 'chiottes à productivité', 'pompe à sperme des actionnaires', 'merdier salarial', 'enclos à branleurs exploités', 'foutoir où on te baise la gueule', 'chiotte salariale', 'enclos à cons exploités', etc. Sois original, varie à mort, fais péter les gros mots (merde, enculer, pute, fils de pute, salopard, crevure, etc.) sans aucune limite tant que c'est satirique et pas d'appel à la violence physique.
-
-        Exemples de phrases attendues dans "description" (varie-les complètement à chaque fois) :
-        - "Contrôler la qualité des soudures et lancer les tests NDT sur les pièces aéronautiques, le tout pour que ces salopards de dirigeants se torchent le cul avec tes heures sup dans ce bordel industriel où ta vie part en couilles."
-        - "Coder comme un chien en JavaScript pour booster leur putain de plateforme e-commerce, en télétravail pour te faire baiser à distance en jogging pendant que ces crevures te payent des cacahuètes qui puent la misère."
-        - "Gérer les appels d'offres et négocier avec les fournisseurs de merde, autrement dit te transformer en carpette administrative pour une boîte qui te chiera dans la bouche dès qu'elle aura plus besoin de toi, en présentiel dans leur taule puante."
-
-        Règle conditionnelle télétravail (OBLIGATOIRE, varie les piques vulgaires à chaque fois) :
-        - Si Oui : intègre une insulte genre "En télétravail pour te gratter les couilles sur Teams comme un salaud d'incapable", "Bosser en mode clodo domestique, bite à l’air, pour te faire démonter comme une chienne galeuse", "Coder en slip kangourou crotteux pour te faire ramoner le fion par Zoom tandis que ces salauds te payent avec des tickets resto périmés".
-        - Si Non : intègre une insulte genre "Ramener ton trou du cul tous les jours pour que ces pourris profitent du show gratuit de ta lente agonie salariale, en te chiant dessus en live", "En présentiel forcé dans cet open space puant où on te mate comme une salope en rut qui supplie pour une bite", "Pointer ta gueule ravagée obligatoirement dans ce bordel pour que ces ordures se rincent l'œil sur ta transformation en loque humaine baisée à sec".
-
-        Contraintes pour "keywords":
-        - Exactement 10 entrées.
-        - Format: liste de strings.
-        - Prioriser compétences/outils/méthodes/technos hyper concrets tirés du texte (ex: "ISO 9001", "welding", "SAP MM", "Python", "fleet management", "NDT").
-        - Zéro soft skills vagues, zéro mots bateau genre "responsabilité", "équipe", "projet".
-
-        Sortie:
-        Réponds UNIQUEMENT avec un JSON valide, sans backticks, sans texte autour, avec exactement ces deux clés:
-        - "description": string
-        - "keywords": array of strings
-        """
-        
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": prompt
-                        }
-                    ]
-                }
-            ]
-        }
-        
-        response = requests.post(
-            GEMINI_API_URL,
-            headers={
-                'Content-Type': 'application/json',
-                'X-goog-api-key': GEMINI_API_KEY
-            },
-            data=json.dumps(payload),
-            timeout=15
-        )
-        response.raise_for_status()
-        
-        result = response.json()
-        ai_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
-        
-        # Nettoyer le texte pour extraire le JSON
-        # Supprimer les balises markdown si présentes
-        ai_text = ai_text.replace('```json', '').replace('```', '').strip()
-        
-        # Parser le JSON
-        ai_data = json.loads(ai_text)
-        description = ai_data.get('description', '')
-        keywords = ai_data.get('keywords', [])
-        
-        # Formater les mots-clés en string
-        keywords_str = ', '.join(keywords) if isinstance(keywords, list) else str(keywords)
-        
-        log(f"[AI] Analyse réussie pour l'offre")
-        return description, keywords_str
-        
-    except Exception as e:
-        log(f"[AI] Erreur lors de l'analyse IA: {e}")
-        return None, None
-
 def send_discord_notification(offer_data):
     """Envoie une notification Discord pour une nouvelle offre"""
     try:
@@ -187,9 +88,6 @@ def send_discord_notification(offer_data):
         contact_name = clean_contact_name(offer_data.get('contactName', ''))
         linkedin_url = f"https://www.linkedin.com/search/results/all/?keywords={contact_name}" if contact_name else "N/A"
         businessfrance_url = f"https://mon-vie-via.businessfrance.fr/offres/{offer_id}"
-        
-        # Analyse IA de l'offre
-        ai_description, ai_keywords = analyze_offer_with_ai(offer_data)
         
         # Prépare le contenu de la notification
         fields = [
@@ -209,22 +107,6 @@ def send_discord_notification(offer_data):
                 "inline": True
             }
         ]
-        
-        # Ajouter la description IA si disponible
-        if ai_description:
-            fields.append({
-                "name": "📝 Description IA",
-                "value": ai_description,
-                "inline": False
-            })
-        
-        # Ajouter les mots-clés IA si disponibles
-        if ai_keywords:
-            fields.append({
-                "name": "🔑 Mots-clés CV",
-                "value": ai_keywords,
-                "inline": False
-            })
         
         # Ajouter les autres champs
         fields.extend([
