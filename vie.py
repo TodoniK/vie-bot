@@ -89,13 +89,18 @@ def country_code_to_flag(country_code):
     return ''.join(chr(ord(c.upper()) + 127397) for c in country_code)
 
 def sanitize_markdown(text):
-    """Échappe les caractères spéciaux Discord markdown pour éviter les problèmes d'affichage"""
+    """Supprime les caractères spéciaux Discord markdown et HTML du contenu API"""
     if not text:
         return ""
-    # Échappe les caractères markdown Discord : * _ ` ~ | > [ ] ( )
-    for char in ['*', '_', '`', '~', '|', '>', '[', ']', '(', ')']:
-        text = text.replace(char, f'\\{char}')
-    return text
+    # Supprime les tags HTML
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Supprime les caractères markdown Discord
+    text = re.sub(r'[*_`~|>\[\]()#]', '', text)
+    # Remplace les retours à la ligne par des espaces
+    text = text.replace('\n', ' ').replace('\r', ' ')
+    # Supprime les espaces multiples
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 def truncate_text(text, max_len=200):
     """Tronque un texte proprement avec ellipsis"""
