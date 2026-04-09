@@ -1,0 +1,12 @@
+.env
+.env.example
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+.vscode
+.idea
+.DS_Store
+README.md
+ids.txt

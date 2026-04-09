@@ -89,6 +89,52 @@ Pour modifier les zones géographiques ou d'autres critères, éditez directemen
 python3 vie.py
 ```
 
+### 🐳 Déploiement Docker / Dokploy (recommandé)
+
+Le projet inclut un `Dockerfile` prêt à l'emploi. Le script tourne en boucle (toutes les 60 secondes par défaut).
+
+#### Déploiement sur Dokploy
+
+1. **Créer une application** dans Dokploy :
+   - Type : **Application**
+   - Source : **GitHub** → sélectionnez le repo `TodoniK/vie-bot`
+   - Build : **Dockerfile**
+
+2. **Configurer les variables d'environnement** dans l'onglet "Environment" :
+   ```
+   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+   CHECK_INTERVAL=60
+   ```
+
+3. **Monter un volume** dans l'onglet "Advanced" → "Volumes" :
+   ```
+   /app/data
+   ```
+   ⚠️ **Important** : ce volume persiste `ids.txt`. Sans lui, le bot renverra toutes les offres à chaque redémarrage.
+
+4. **Déployer** — le bot démarre automatiquement et vérifie les nouvelles offres toutes les 60 secondes.
+
+#### Variables Docker
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `DISCORD_WEBHOOK_URL` | *(obligatoire)* | URL du webhook Discord |
+| `CHECK_INTERVAL` | `60` | Intervalle en secondes entre chaque vérification |
+| `SEARCH_QUERY` | `engineer` | Mot-clé de recherche |
+| `SEARCH_LIMIT` | `5000` | Nombre max d'offres à récupérer |
+| `DATA_DIR` | `/app/data` | Répertoire de stockage de `ids.txt` |
+
+#### Test local avec Docker
+
+```bash
+docker build -t vie-bot .
+docker run -d \
+  -e DISCORD_WEBHOOK_URL=votre_webhook_ici \
+  -v vie-data:/app/data \
+  --name vie-bot \
+  vie-bot
+```
+
 ### Exécution périodique (Linux/macOS)
 
 Configurez un cron job pour une vérification automatique :
@@ -164,6 +210,9 @@ Chaque nouvelle offre génère une notification Discord contenant :
 ```
 VIE/
 ├── vie.py                  # Script principal
+├── Dockerfile              # Configuration Docker
+├── entrypoint.sh           # Script de démarrage (boucle)
+├── .dockerignore           # Fichiers exclus du build Docker
 ├── ids.txt                 # IDs des offres déjà traitées (auto-généré)
 ├── .env                    # Configuration (à créer depuis .env.example)
 ├── .env.example            # Exemple de configuration

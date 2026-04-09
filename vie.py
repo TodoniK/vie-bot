@@ -19,9 +19,10 @@ if not DISCORD_WEBHOOK_URL:
     print("[INFO] Creez un fichier .env a partir de .env.example et configurez votre webhook")
     exit(1)
 
-# Chemins de fichiers (relatif au script)
+# Chemins de fichiers (DATA_DIR pour Docker, sinon relatif au script)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-IDS_FILE = os.path.join(SCRIPT_DIR, 'ids.txt')
+DATA_DIR = os.getenv('DATA_DIR', SCRIPT_DIR)
+IDS_FILE = os.path.join(DATA_DIR, 'ids.txt')
 
 # Configuration API
 API_BASE_URL = "https://civiweb-api-prd.azurewebsites.net/api"
