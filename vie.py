@@ -82,93 +82,105 @@ def get_offer_details(offer_id):
         log(f"Erreur lors de la récupération des détails de l'offre {offer_id}: {e}")
         return None
 
+def country_code_to_flag(country_code):
+    """Convertit un code pays ISO 2 lettres en emoji drapeau (FR → 🇫🇷)"""
+    if not country_code or len(country_code) != 2:
+        return "🌍"
+    return ''.join(chr(ord(c.upper()) + 127397) for c in country_code)
+
+def truncate_text(text, max_len=200):
+    """Tronque un texte proprement avec ellipsis"""
+    if not text or len(text) <= max_len:
+        return text or ""
+    return text[:max_len].rsplit(' ', 1)[0] + "…"
+
+def format_indemnite(amount):
+    """Formate un montant en format français (2 994,76)"""
+    if not amount:
+        return "N/A"
+    integer_part = int(amount)
+    decimal_part = int(round((amount - integer_part) * 100))
+    formatted_int = f"{integer_part:,}".replace(",", "\u202f")
+    return f"{formatted_int},{decimal_part:02d}"
+
 def send_discord_notification(offer_data):
     """Envoie une notification Discord pour une nouvelle offre"""
     try:
         offer_id = str(offer_data['id'])
         contact_name = clean_contact_name(offer_data.get('contactName', ''))
-        linkedin_url = f"https://www.linkedin.com/search/results/all/?keywords={contact_name}" if contact_name else "N/A"
+        linkedin_url = f"https://www.linkedin.com/search/results/all/?keywords={contact_name}" if contact_name else None
         businessfrance_url = f"https://mon-vie-via.businessfrance.fr/offres/{offer_id}"
-        
-        # Prépare le contenu de la notification
+
+        # ── Localisation avec drapeau ──
+        flag = country_code_to_flag(offer_data.get('countryId', ''))
+        city = (offer_data.get('cityName', '') or '').strip()
+        country = offer_data.get('countryName', 'N/A')
+        location = f"{flag}  **{city}**, {country}" if city else f"{flag}  {country}"
+
+        # ── Extrait de la mission ──
+        mission_desc = (offer_data.get('missionDescription', '') or '').strip().lstrip(':').strip()
+        excerpt_block = f"\n> *{truncate_text(mission_desc, 200)}*\n" if mission_desc else ""
+
+        # ── Métriques ──
+        indemnite_str = format_indemnite(offer_data.get('indemnite', 0))
+        duration = offer_data.get('missionDuration', '—')
+        start = format_date(offer_data.get('missionStartDate'))
+        end = format_date(offer_data.get('missionEndDate'))
+        telework = "✅ Oui" if offer_data.get('teleworkingAvailable') else "❌ Non"
+
+        # ── Construction de la description ──
+        description = (
+            f"{location}\n"
+            f"{excerpt_block}\n"
+            f"───────────────────────────\n"
+            f"\n"
+            f"💰  **{indemnite_str} €** /mois\n"
+            f"⏱️  **{duration} mois**  ─  {start} → {end}\n"
+            f"💼  Télétravail : {telework}\n"
+        )
+
+        # ── Champs contact & liens ──
+        email = offer_data.get('contactEmail', 'N/A')
+        links = [f"[🌐 Voir l'offre]({businessfrance_url})"]
+        if linkedin_url:
+            links.append(f"[💼 LinkedIn]({linkedin_url})")
+
         fields = [
             {
-                "name": "🏭 Entreprise",
-                "value": offer_data.get('organizationName', 'N/A'),
+                "name": "📧  Contact",
+                "value": f"`{email}`" if email != 'N/A' else "N/A",
                 "inline": True
             },
             {
-                "name": "🌍 Pays",
-                "value": offer_data.get('countryName', 'N/A'),
-                "inline": True
-            },
-            {
-                "name": "🏙️ Ville",
-                "value": offer_data.get('cityName', 'N/A').strip() if offer_data.get('cityName') else 'N/A',
+                "name": "🔗  Liens rapides",
+                "value": "\n".join(links),
                 "inline": True
             }
         ]
-        
-        # Ajouter les autres champs
-        fields.extend([
-            {
-                "name": "📅 Durée (mois)",
-                "value": str(offer_data.get('missionDuration', 'N/A')),
-                "inline": True
-            },
-            {
-                "name": "🎬 Début",
-                "value": format_date(offer_data.get('missionStartDate')),
-                "inline": True
-            },
-            {
-                "name": "🏁 Fin",
-                "value": format_date(offer_data.get('missionEndDate')),
-                "inline": True
-            },
-            {
-                "name": "📧 Email",
-                "value": offer_data.get('contactEmail', 'N/A'),
-                "inline": True
-            },
-            {
-                "name": "🌐 Business France",
-                "value": f"[Voir Offre]({businessfrance_url})",
-                "inline": True
-            },
-            {
-                "name": "🔗 LinkedIn",
-                "value": f"[Rechercher Contact]({linkedin_url})" if contact_name else "N/A",
-                "inline": True
-            },
-            {
-                "name": "💼 Télétravail",
-                "value": "✅ Oui" if offer_data.get('teleworkingAvailable') else "❌ Non",
-                "inline": True
-            },
-            {
-                "name": "💵 Indemnité",
-                "value": f"{offer_data.get('indemnite', 0):.2f} €",
-                "inline": True
-            },
-            {
-                "name": "📆 Date de publication",
-                "value": format_date(offer_data.get('creationDate')),
-                "inline": True
-            }
-        ])
-        
+
+        # ── Couleur selon télétravail ──
+        color = 0x2ECC71 if offer_data.get('teleworkingAvailable') else 0x0055A4
+
+        reference = offer_data.get('reference', f'VIE{offer_id}')
+        pub_date = format_date(offer_data.get('creationDate'))
+
         content = {
-            "embeds": [
-                {
-                    "title": offer_data.get('missionTitle', 'Sans titre'),
-                    "fields": fields,
-                    "color": 3447003,  # Bleu
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            ]
+            "embeds": [{
+                "author": {
+                    "name": f"🏢  {offer_data.get('organizationName', 'Entreprise')}"
+                },
+                "title": offer_data.get('missionTitle', 'Sans titre'),
+                "url": businessfrance_url,
+                "description": description,
+                "fields": fields,
+                "color": color,
+                "footer": {
+                    "text": f"📆 Publiée le {pub_date}  •  {reference}"
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }]
         }
-        
+
         response = requests.post(
             DISCORD_WEBHOOK_URL,
             data=json.dumps(content),
