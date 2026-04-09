@@ -88,12 +88,6 @@ def country_code_to_flag(country_code):
         return "🌍"
     return ''.join(chr(ord(c.upper()) + 127397) for c in country_code)
 
-def truncate_text(text, max_len=200):
-    """Tronque un texte proprement avec ellipsis"""
-    if not text or len(text) <= max_len:
-        return text or ""
-    return text[:max_len].rsplit(' ', 1)[0] + "…"
-
 def format_indemnite(amount):
     """Formate un montant en format français (2 994,76)"""
     if not amount:
@@ -117,10 +111,6 @@ def send_discord_notification(offer_data):
         country = offer_data.get('countryName', 'N/A')
         location = f"{flag}  **{city}**, {country}" if city else f"{flag}  {country}"
 
-        # ── Extrait de la mission ──
-        mission_desc = (offer_data.get('missionDescription', '') or '').strip().lstrip(':').strip()
-        excerpt_block = f"\n> *{truncate_text(mission_desc, 200)}*\n" if mission_desc else ""
-
         # ── Métriques ──
         indemnite_str = format_indemnite(offer_data.get('indemnite', 0))
         duration = offer_data.get('missionDuration', '—')
@@ -131,19 +121,18 @@ def send_discord_notification(offer_data):
         # ── Construction de la description ──
         description = (
             f"{location}\n"
-            f"{excerpt_block}\n"
-            f"───────────────────────────\n"
             f"\n"
-            f"💰  **{indemnite_str} €** /mois\n"
-            f"⏱️  **{duration} mois**  ─  {start} → {end}\n"
-            f"💼  Télétravail : {telework}\n"
+            f"💵  **{indemnite_str} €** /mois  •  ⏱️ **{duration} mois**\n"
+            f"🎬  Début : **{start}**\n"
+            f"🏁  Fin : **{end}**\n"
+            f"🏠  Télétravail : {telework}\n"
         )
 
         # ── Champs contact & liens ──
         email = offer_data.get('contactEmail', 'N/A')
         links = [f"[🌐 Voir l'offre]({businessfrance_url})"]
         if linkedin_url:
-            links.append(f"[💼 LinkedIn]({linkedin_url})")
+            links.append(f"[🔍 LinkedIn]({linkedin_url})")
 
         fields = [
             {
