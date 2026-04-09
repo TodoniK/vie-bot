@@ -1,0 +1,16 @@
+[project]
+name = "vie-bot"
+version = "2.0.0"
+description = "Détecteur de nouvelles offres VIE avec notifications Discord"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic-settings>=2.0",
+]
+
+[project.scripts]
+vie-bot = "vie_bot.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

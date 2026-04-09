@@ -9,4 +9,4 @@ __pycache__
 .idea
 .DS_Store
 README.md
-ids.txt
+docker-compose.yml
