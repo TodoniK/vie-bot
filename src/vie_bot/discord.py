@@ -64,7 +64,7 @@ def _clean_contact_name(name: str | None) -> str:
 # ── Embed builder ────────────────────────────────────────
 
 
-def _build_embed(offer: dict) -> dict:
+def _build_embed(offer: dict, category: str) -> dict:
     offer_id = str(offer["id"])
     contact_name = _clean_contact_name(offer.get("contactName", ""))
     linkedin_url = (
@@ -113,7 +113,7 @@ def _build_embed(offer: dict) -> dict:
         {"name": "🔗  Liens rapides", "value": "\n".join(links), "inline": True},
     ]
 
-    color = 0x2ECC71 if offer.get("teleworkingAvailable") else 0x0055A4
+    color = 0xE67E22 if category == "it" else 0x9B59B6
     reference = offer.get("reference", f"VIE{offer_id}")
     pub_date = _format_date(offer.get("creationDate"))
 
@@ -136,9 +136,9 @@ def _build_embed(offer: dict) -> dict:
 # ── Sender ───────────────────────────────────────────────
 
 
-async def send_notification(client: httpx.AsyncClient, offer: dict) -> bool:
+async def send_notification(client: httpx.AsyncClient, offer: dict, category: str) -> bool:
     """Envoie une notification Discord pour une offre."""
-    payload = _build_embed(offer)
+    payload = _build_embed(offer, category)
     try:
         resp = await client.post(
             settings.discord_webhook_url,
@@ -151,3 +151,23 @@ async def send_notification(client: httpx.AsyncClient, offer: dict) -> bool:
     except httpx.HTTPError as e:
         logger.error("Failed to send notification for offer %s: %s", offer["id"], e)
         return False
+
+
+async def send_error_alert(title: str, message: str, color: int = 0xE74C3C) -> None:
+    """Envoie une alerte d'erreur (ou de rétablissement) au webhook Discord."""
+    payload = {
+        "embeds": [
+            {
+                "title": title,
+                "description": message,
+                "color": color,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(settings.discord_webhook_url, json=payload, timeout=10)
+            resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.error("Failed to send error alert to Discord: %s", e)

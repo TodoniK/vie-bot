@@ -5,12 +5,14 @@ Bot de monitoring des offres de VIE (Volontariat International en Entreprise) pu
 ## ✨ Fonctionnalités
 
 - **Monitoring temps réel** — vérifie les nouvelles offres toutes les 60 secondes
-- **Notifications Discord riches** — embeds avec drapeaux pays 🇫🇷🇩🇪🇮🇹, indemnité, dates, télétravail
-- **Async & parallèle** — récupération des détails par batch avec `httpx`
+- **Filtrage IT/RH** — ne notifie que les offres IT/réseau (Amérique du Nord, Océanie, Asie du Sud-Est) et RH (partout), classification par mots-clés sur le titre
+- **Notifications Discord riches** — embeds avec drapeaux pays 🇫🇷🇩🇪🇮🇹, indemnité, dates, télétravail, couleur par catégorie (🟠 IT / 🟣 RH)
+- **Async & paginé** — récupération de toutes les offres via `httpx` (l'API plafonne à 200 résultats par page)
 - **Stockage SQLite** — persistance crash-safe des IDs (remplace `ids.txt`)
 - **Migration automatique** — importe `ids.txt` legacy vers SQLite au premier lancement
 - **Arrêt gracieux** — gestion propre de SIGTERM/SIGINT (Docker)
 - **Config validée** — Pydantic Settings avec validation au démarrage
+- **Alerting Discord** — notifie le salon en cas d'erreur (401, panne API...) et de rétablissement, pas besoin de surveiller les logs
 
 ## 🚀 Déploiement
 
@@ -36,6 +38,7 @@ docker compose up -d
 | Variable | Défaut | Description |
 |---|---|---|
 | `DISCORD_WEBHOOK_URL` | *(obligatoire)* | URL du webhook Discord |
+| `CIVIWEB_API_KEY` | *(obligatoire)* | Header `X-API-KEY` requis par l'API Business France (voir `.env.example` pour comment la récupérer) |
 | `CHECK_INTERVAL` | `60` | Intervalle en secondes entre chaque vérification |
 | `SEARCH_LIMIT` | `5000` | Nombre max d'offres à récupérer |
 | `DATA_DIR` | `/app/data` | Répertoire de stockage SQLite |
@@ -50,6 +53,17 @@ docker compose up -d
 "countriesIds": [],                                   # IDs de pays spécifiques
 "activitySectorId": [],                               # Secteurs d'activité
 ```
+
+### Personnaliser la classification IT/RH
+
+Le bot ne notifie que les offres classées **IT** (mots-clés + pays cible) ou **RH**
+(mots-clés, sans restriction géo). Tout éditer dans `src/vie_bot/classify.py` :
+
+- `IT_COUNTRIES` — pays cibles pour la catégorie IT (codes ISO)
+- `IT_INCLUDE` / `IT_EXCLUDE` — mots-clés IT et exceptions (ex: "Business Developer" est exclu)
+- `HR_INCLUDE` — mots-clés RH
+
+Lancez `python src/vie_bot/classify.py` après modification pour valider les asserts.
 
 ## 🖥️ Utilisation locale
 
@@ -80,8 +94,10 @@ vie-bot/
 │   ├── __init__.py
 │   ├── __main__.py     # Point d'entrée + boucle scheduler
 │   ├── config.py       # Pydantic Settings
-│   ├── api.py          # Client API Business France (async)
+│   ├── api.py          # Client API Business France (async, paginé)
+│   ├── classify.py     # Classification des offres (IT / RH / hors critères)
 │   ├── discord.py      # Webhook Discord + formatage embed
+│   ├── resilience.py   # Cadence des alertes d'erreur Discord
 │   ├── scheduler.py    # Logique de vérification des offres
 │   └── storage.py      # SQLite (persistance des IDs)
 ├── pyproject.toml      # Packaging Python moderne
@@ -95,13 +111,11 @@ vie-bot/
 
 ## 🔄 Comment ça marche ?
 
-1. Interroge l'API `/api/Offers/search` toutes les 60 secondes
+1. Interroge l'API `/api/Offers/search` toutes les 60 secondes (paginé, 200 offres/page)
 2. Compare les IDs avec la base SQLite locale
-3. Pour chaque nouvelle offre :
-   - Récupère les détails via `/api/Offers/details/{id}` (par batch de 10 en parallèle)
-   - Formate un embed Discord riche
-4. Trie les offres par date de publication et envoie les notifications
-5. Sauvegarde les IDs dans SQLite
+3. Classe chaque nouvelle offre : **IT** (mots-clés + pays cible) / **RH** (mots-clés) / hors critères
+4. Pour les offres IT ou RH, formate et envoie un embed Discord (couleur par catégorie)
+5. Sauvegarde tous les IDs traités dans SQLite (envoyés + hors critères), pour ne jamais les retraiter
 
 ## 📱 Configuration du Webhook Discord
 
@@ -111,6 +125,9 @@ vie-bot/
 ## 🐛 Dépannage
 
 - **Pas de notifications** → vérifiez `DISCORD_WEBHOOK_URL` et les logs Docker
+- **401 Unauthorized sur `/api/Offers/search`** → la clé `CIVIWEB_API_KEY` a probablement expiré (Business France a redéployé son frontend). Récupérez la nouvelle valeur via le Network tab du navigateur et mettez à jour la variable d'environnement. Le bot envoie une alerte Discord dès le 1er échec, puis toutes les ~10 min tant que l'erreur persiste.
+- **400 Bad Request sur `/api/Offers/search`** → l'API plafonne `limit` à 200 ; le bot pagine automatiquement, mais si Business France change encore ce plafond, ajustez `PAGE_SIZE` dans `api.py`.
+- **Pas de notifications alors que de nouvelles offres existent** → normal si elles ne matchent ni les critères IT ni RH (voir `classify.py`)
 - **Erreurs de connexion** → l'API Business France peut être temporairement indisponible
 - **Trop de notifications au démarrage** → assurez-vous que le volume `/app/data` est bien monté
 

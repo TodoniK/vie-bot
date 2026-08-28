@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 from vie_bot.config import settings
+from vie_bot.discord import send_error_alert
+from vie_bot.resilience import should_alert
 from vie_bot.scheduler import check_new_offers
 from vie_bot.storage import import_from_txt
 
@@ -33,6 +35,7 @@ async def _run() -> None:
 
     # Boucle principale
     stop = asyncio.Event()
+    consecutive_failures = 0
 
     def _handle_signal() -> None:
         logger.info("Shutdown signal received")
@@ -45,8 +48,23 @@ async def _run() -> None:
     while not stop.is_set():
         try:
             await check_new_offers()
-        except Exception:
+            if consecutive_failures:
+                await send_error_alert(
+                    "✅ Bot VIE rétabli",
+                    f"Fonctionne de nouveau normalement après {consecutive_failures} "
+                    f"échec(s) consécutif(s).",
+                    color=0x2ECC71,
+                )
+            consecutive_failures = 0
+        except Exception as e:
             logger.exception("Error during check cycle")
+            consecutive_failures += 1
+            if should_alert(consecutive_failures):
+                await send_error_alert(
+                    "🔴 Bot VIE en erreur",
+                    f"```{e}```\n{consecutive_failures} échec(s) consécutif(s) "
+                    f"depuis le début de l'incident.",
+                )
 
         # Attente interruptible
         try:
