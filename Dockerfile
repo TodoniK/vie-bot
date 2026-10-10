@@ -6,11 +6,12 @@ WORKDIR /app
 
 COPY pyproject.toml .
 COPY src/ src/
-RUN uv pip install --system --no-cache . \
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system --no-cache . \
     && useradd --system --uid 10001 --home /app vie \
     && mkdir -p /app/data && chown vie:vie /app/data
 
-ENV DATA_DIR=/app/data
+ENV DATA_DIR=/app/data TZ=Europe/Paris
 USER vie
 
 # Sain si un cycle a réussi récemment (voir vie_bot.__main__.healthcheck)

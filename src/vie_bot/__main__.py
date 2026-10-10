@@ -17,6 +17,8 @@ def _setup_logging() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
     )
+    # httpx journalise l'URL complète en INFO : le jeton du webhook Discord finirait dans les logs
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 async def _run() -> None:
