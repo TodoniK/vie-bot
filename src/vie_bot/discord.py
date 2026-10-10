@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -118,43 +120,79 @@ def _build_embed(offer: dict, category: str) -> dict:
     pub_date = _format_date(offer.get("creationDate"))
 
     return {
-        "embeds": [
-            {
-                "author": {"name": f"🏢  {offer.get('organizationName', 'Entreprise')}"},
-                "title": offer.get("missionTitle", "Sans titre"),
-                "url": bf_url,
-                "description": description,
-                "fields": fields,
-                "color": color,
-                "footer": {"text": f"📆 Publiée le {pub_date}  •  {reference}"},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
-        ]
+        "author": {"name": f"🏢  {offer.get('organizationName', 'Entreprise')}"},
+        "title": _truncate(offer.get("missionTitle", "Sans titre"), 250),
+        "url": bf_url,
+        "description": description,
+        "fields": fields,
+        "color": color,
+        "footer": {"text": f"📆 Publiée le {pub_date}  •  {reference}"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 # ── Sender ───────────────────────────────────────────────
 
+# Limites Discord par message : 10 embeds et 6 000 caractères cumulés
+MAX_EMBEDS = 10
+MAX_CHARS = 5500  # marge sous 6 000 (la taille JSON surestime le texte compté)
 
-async def send_notification(client: httpx.AsyncClient, offer: dict, category: str) -> bool:
-    """Envoie une notification Discord pour une offre."""
-    payload = _build_embed(offer, category)
-    try:
-        resp = await client.post(
-            settings.discord_webhook_url,
-            json=payload,
-            timeout=10,
-        )
+
+def _embed_size(embed: dict) -> int:
+    return len(json.dumps(embed, ensure_ascii=False))
+
+
+def batch_embeds(items: list[tuple[int, dict]]) -> list[list[tuple[int, dict]]]:
+    """Regroupe (id, embed) en messages respectant les limites Discord."""
+    batches: list[list[tuple[int, dict]]] = []
+    current: list[tuple[int, dict]] = []
+    size = 0
+    for item in items:
+        s = _embed_size(item[1])
+        if current and (len(current) >= MAX_EMBEDS or size + s > MAX_CHARS):
+            batches.append(current)
+            current, size = [], 0
+        current.append(item)
+        size += s
+    if current:
+        batches.append(current)
+    return batches
+
+
+async def _post(client: httpx.AsyncClient, payload: dict, attempts: int = 5) -> None:
+    """POST sur le webhook en respectant les 429 (retry_after) de Discord."""
+    for _ in range(attempts):
+        resp = await client.post(settings.discord_webhook_url, json=payload, timeout=10)
+        if resp.status_code == 429:
+            try:
+                delay = float(resp.json().get("retry_after", 1))
+            except ValueError:
+                delay = float(resp.headers.get("Retry-After", 1))
+            logger.warning("Discord 429, nouvel essai dans %.1fs", delay)
+            await asyncio.sleep(min(delay, 60) + 0.1)
+            continue
         resp.raise_for_status()
-        logger.info("Sent notification for offer %s", offer["id"])
-        return True
-    except httpx.HTTPError as e:
-        logger.error("Failed to send notification for offer %s: %s", offer["id"], e)
-        return False
+        return
+    raise httpx.HTTPError("Discord : trop de 429 consécutifs")
+
+
+async def send_offers(client: httpx.AsyncClient, offers: list[tuple[dict, str]]) -> list[int]:
+    """Envoie les offres (offre, catégorie) par lots ; retourne les IDs effectivement envoyés."""
+    items = [(o["id"], _build_embed(o, c)) for o, c in offers]
+    sent: list[int] = []
+    for batch in batch_embeds(items):
+        try:
+            await _post(client, {"embeds": [e for _, e in batch]})
+            sent.extend(i for i, _ in batch)
+            logger.info("Sent %d offer(s): %s", len(batch), [i for i, _ in batch])
+        except httpx.HTTPError as e:
+            logger.error("Failed to send offers %s: %s", [i for i, _ in batch], e)
+        await asyncio.sleep(1)  # webhooks : ~5 req / 2 s
+    return sent
 
 
 async def send_error_alert(title: str, message: str, color: int = 0xE74C3C) -> None:
-    """Envoie une alerte d'erreur (ou de rétablissement) au webhook Discord."""
+    """Envoie une alerte (erreur, rétablissement, info) au webhook Discord."""
     payload = {
         "embeds": [
             {
@@ -167,7 +205,6 @@ async def send_error_alert(title: str, message: str, color: int = 0xE74C3C) -> N
     }
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(settings.discord_webhook_url, json=payload, timeout=10)
-            resp.raise_for_status()
+            await _post(client, payload)
     except httpx.HTTPError as e:
-        logger.error("Failed to send error alert to Discord: %s", e)
+        logger.error("Failed to send alert to Discord: %s", e)

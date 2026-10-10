@@ -9,7 +9,10 @@ Bot de monitoring des offres de VIE (Volontariat International en Entreprise) pu
 - **Notifications Discord riches** — embeds avec drapeaux pays 🇫🇷🇩🇪🇮🇹, indemnité, dates, télétravail, couleur par catégorie (🟠 IT / 🟣 RH)
 - **Async & paginé** — récupération de toutes les offres via `httpx` (l'API plafonne à 200 résultats par page)
 - **Stockage SQLite** — persistance crash-safe des IDs (remplace `ids.txt`)
-- **Migration automatique** — importe `ids.txt` legacy vers SQLite au premier lancement
+- **Premier démarrage silencieux** — base vide : les offres existantes sont mémorisées sans être postées
+- **Clé API automatique** — la clé `X-API-KEY` est lue dans la page publique Business France et relue seule en cas de 401/403
+- **Lots Discord** — jusqu'à 10 offres par message, respect des 429 (`retry_after`)
+- **Healthcheck Docker** — conteneur `unhealthy` si aucun cycle n'a réussi depuis 3 intervalles + 5 min
 - **Arrêt gracieux** — gestion propre de SIGTERM/SIGINT (Docker)
 - **Config validée** — Pydantic Settings avec validation au démarrage
 - **Alerting Discord** — notifie le salon en cas d'erreur (401, panne API...) et de rétablissement, pas besoin de surveiller les logs
@@ -31,14 +34,16 @@ docker compose up -d
 3. **Variables d'environnement** (onglet "Environment") : configurer `DISCORD_WEBHOOK_URL`
 4. **Déployer**
 
-> ℹ️ Les IDs connus sont embarqués dans l'image via `ids.txt`. À chaque démarrage, ils sont importés dans SQLite. Si le container redémarre, seules les offres apparues entre-temps peuvent être renvoyées.
+> ℹ️ Les IDs vus sont dans `DATA_DIR/vie_bot.db` (volume). Sur un volume neuf, le premier cycle mémorise l'existant sans rien poster.
 
 ## ⚙️ Configuration
 
 | Variable | Défaut | Description |
 |---|---|---|
 | `DISCORD_WEBHOOK_URL` | *(obligatoire)* | URL du webhook Discord |
-| `CIVIWEB_API_KEY` | *(obligatoire)* | Header `X-API-KEY` requis par l'API Business France (voir `.env.example` pour comment la récupérer) |
+| `CIVIWEB_API_KEY` | *(auto)* | Header `X-API-KEY` de l'API Business France. Facultatif : lu dans la page publique et rafraîchi sur 401/403 |
+| `IT_COUNTRIES` | Amérique du Nord, Océanie, Asie du Sud-Est | Codes pays ISO pour les offres IT, séparés par des virgules |
+| `IT_EXTRA_KEYWORDS`, `HR_EXTRA_KEYWORDS`, `EXCLUDE_EXTRA_KEYWORDS` | *(vide)* | Mots-clés ajoutés aux listes de `classify.py` |
 | `CHECK_INTERVAL` | `60` | Intervalle en secondes entre chaque vérification |
 | `SEARCH_LIMIT` | `5000` | Nombre max d'offres à récupérer |
 | `DATA_DIR` | `/app/data` | Répertoire de stockage SQLite |
@@ -104,7 +109,7 @@ vie-bot/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
-├── ids.txt             # IDs connus (fallback embarqué dans l'image)
+├── tests/              # pytest (lancé en CI avant publication de l'image)
 ├── .dockerignore
 └── README.md
 ```
@@ -125,7 +130,7 @@ vie-bot/
 ## 🐛 Dépannage
 
 - **Pas de notifications** → vérifiez `DISCORD_WEBHOOK_URL` et les logs Docker
-- **401 Unauthorized sur `/api/Offers/search`** → la clé `CIVIWEB_API_KEY` a probablement expiré (Business France a redéployé son frontend). Récupérez la nouvelle valeur via le Network tab du navigateur et mettez à jour la variable d'environnement. Le bot envoie une alerte Discord dès le 1er échec, puis toutes les ~10 min tant que l'erreur persiste.
+- **401 Unauthorized sur `/api/Offers/search`** → le bot relit automatiquement la clé dans la page publique. Si l'erreur persiste, Business France a changé le format de sa page (`API_KEY:"..."`) : adapter `extract_api_key` dans `api.py`. Le bot envoie une alerte Discord dès le 1er échec, puis toutes les ~10 min tant que l'erreur persiste.
 - **400 Bad Request sur `/api/Offers/search`** → l'API plafonne `limit` à 200 ; le bot pagine automatiquement, mais si Business France change encore ce plafond, ajustez `PAGE_SIZE` dans `api.py`.
 - **Pas de notifications alors que de nouvelles offres existent** → normal si elles ne matchent ni les critères IT ni RH (voir `classify.py`)
 - **Erreurs de connexion** → l'API Business France peut être temporairement indisponible

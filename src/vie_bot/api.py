@@ -1,4 +1,6 @@
+import json
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -13,10 +15,9 @@ HEADERS = {
     "Origin": "https://mon-vie-via.businessfrance.fr",
     "Referer": "https://mon-vie-via.businessfrance.fr/",
     "User-Agent": "Mozilla/5.0",
-    "X-API-KEY": settings.civiweb_api_key,
 }
 
-# L'API plafonne "limit" à 200 (400 Bad Request au-delà) : on paginle.
+# L'API plafonne "limit" à 200 (400 Bad Request au-delà) : on pagine.
 PAGE_SIZE = 200
 
 BASE_PAYLOAD = {
@@ -32,6 +33,52 @@ BASE_PAYLOAD = {
     "specializationsIds": [],
     "entreprisesIds": [0],
 }
+
+# Clé courante : variable d'environnement, sinon relue sur la page publique
+_api_key: str | None = settings.civiweb_api_key
+
+# Le front Nuxt sérialise sa config publique : ...,API_KEY:"l+Kw\u002F...",...
+_API_KEY_RE = re.compile(r'[,{]API_KEY:"((?:[^"\\]|\\.)*)"')
+
+
+def extract_api_key(html: str) -> str | None:
+    """Extrait la clé X-API-KEY du HTML de mon-vie-via (échappements JS décodés)."""
+    m = _API_KEY_RE.search(html)
+    return json.loads(f'"{m.group(1)}"') if m else None
+
+
+async def refresh_api_key(client: httpx.AsyncClient) -> str:
+    global _api_key
+    resp = await client.get(settings.api_key_page_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+    resp.raise_for_status()
+    key = extract_api_key(resp.text)
+    if not key:
+        raise RuntimeError(f"API_KEY introuvable dans {settings.api_key_page_url}")
+    if key != _api_key:
+        logger.info("Clé API Business France (re)chargée depuis la page publique")
+    _api_key = key
+    return key
+
+
+async def _search(client: httpx.AsyncClient, skip: int) -> dict[str, Any]:
+    if not _api_key:
+        await refresh_api_key(client)
+    payload = {**BASE_PAYLOAD, "limit": PAGE_SIZE, "skip": skip}
+    for attempt in (1, 2):
+        resp = await client.post(
+            settings.api_search_url,
+            json=payload,
+            headers={**HEADERS, "X-API-KEY": _api_key or ""},
+            timeout=30,
+        )
+        # Clé périmée (Business France a redéployé son front) : on la relit une fois
+        if resp.status_code in (401, 403) and attempt == 1:
+            logger.warning("API %s : rafraîchissement de la clé", resp.status_code)
+            await refresh_api_key(client)
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    raise AssertionError("unreachable")
 
 
 async def fetch_all_offers(client: httpx.AsyncClient) -> list[dict[str, Any]]:
@@ -50,15 +97,7 @@ async def fetch_all_offers(client: httpx.AsyncClient) -> list[dict[str, Any]]:
             logger.warning("search_limit (%d) atteint, arrêt de la pagination", settings.search_limit)
             break
 
-        payload = {**BASE_PAYLOAD, "limit": PAGE_SIZE, "skip": skip}
-        resp = await client.post(
-            settings.api_search_url,
-            json=payload,
-            headers=HEADERS,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        data = await _search(client, skip)
         page = data.get("result", [])
         total = data.get("count", 0)
         offers.extend(page)

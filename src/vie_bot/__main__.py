@@ -1,15 +1,13 @@
 import asyncio
 import logging
-import os
 import signal
 import sys
-from pathlib import Path
 
 from vie_bot.config import settings
 from vie_bot.discord import send_error_alert
 from vie_bot.resilience import should_alert
 from vie_bot.scheduler import check_new_offers
-from vie_bot.storage import import_from_txt
+from vie_bot.storage import heartbeat_age
 
 
 def _setup_logging() -> None:
@@ -24,14 +22,6 @@ def _setup_logging() -> None:
 async def _run() -> None:
     logger = logging.getLogger("vie_bot")
     logger.info("VIE Bot starting (interval: %ds)", settings.check_interval)
-
-    # Migration ids.txt → SQLite (si le fichier existe)
-    legacy_path = Path(settings.data_dir) / "ids.txt"
-    if legacy_path.exists():
-        count = import_from_txt(str(legacy_path))
-        if count:
-            legacy_path.rename(legacy_path.with_suffix(".txt.bak"))
-            logger.info("Migrated ids.txt → SQLite (%d IDs), backup: ids.txt.bak", count)
 
     # Boucle principale
     stop = asyncio.Event()
@@ -75,7 +65,15 @@ async def _run() -> None:
     logger.info("VIE Bot stopped")
 
 
+def healthcheck() -> int:
+    """0 si un cycle a réussi récemment (3 intervalles + 5 min de marge), sinon 1."""
+    age = heartbeat_age()
+    return 0 if age is not None and age < 3 * settings.check_interval + 300 else 1
+
+
 def main() -> None:
+    if sys.argv[1:] == ["healthcheck"]:
+        sys.exit(healthcheck())
     _setup_logging()
     asyncio.run(_run())
 
